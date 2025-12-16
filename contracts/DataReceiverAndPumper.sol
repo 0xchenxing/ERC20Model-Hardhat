@@ -7,9 +7,8 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // 导入自定义接口
 import { IXZToken } from "./interfaces/IXZToken.sol";
+import { IOracle } from "./interfaces/IOracle.sol";
 import { IUniswapV3Router, IUniswapV3Factory, IUniswapV3Pool } from "./interfaces/IUniswapV3.sol";
-
-
 
 contract DataReceiverAndPumper is Ownable, ReentrancyGuard {
     address public baseTokenAddress;
@@ -19,6 +18,15 @@ contract DataReceiverAndPumper is Ownable, ReentrancyGuard {
     uint24 public poolFee;
     uint256 public minReserveThresholdBase;
     uint256 public minReserveThresholdStable;
+    
+    // Oracle合约地址
+    address public oracleAddress;
+    
+    // Oracle合约接口
+    IOracle private oracle;
+    
+    // 事件
+    event OracleSet(address indexed oracleAddress);
 
     // 哈希上链相关
     mapping(bytes32 => uint256) public hashes; // 存储哈希值和对应的时间戳
@@ -33,6 +41,7 @@ contract DataReceiverAndPumper is Ownable, ReentrancyGuard {
         uint24 _poolFee,
         uint256 _minReserveThresholdBase,
         uint256 _minReserveThresholdStable,
+        address _oracleAddress,
         address initialOwner
     ) Ownable(initialOwner) {
         baseTokenAddress = _baseTokenAddress;
@@ -42,12 +51,21 @@ contract DataReceiverAndPumper is Ownable, ReentrancyGuard {
         poolFee = _poolFee;
         minReserveThresholdBase = _minReserveThresholdBase;
         minReserveThresholdStable = _minReserveThresholdStable;
+        setOracle(_oracleAddress);
     }
     
     // 设置最小储备阈值
     function setMinReserveThresholds(uint256 _minReserveThresholdBase, uint256 _minReserveThresholdStable) external onlyOwner {
         minReserveThresholdBase = _minReserveThresholdBase;
         minReserveThresholdStable = _minReserveThresholdStable;
+    }
+    
+    // 设置Oracle合约地址
+    function setOracle(address _oracleAddress) public onlyOwner {
+        require(_oracleAddress != address(0), "Oracle address cannot be zero");
+        oracleAddress = _oracleAddress;
+        oracle = IOracle(_oracleAddress);
+        emit OracleSet(_oracleAddress);
     }
     
     // 获取 Uniswap V3 池子信息
@@ -60,7 +78,6 @@ contract DataReceiverAndPumper is Ownable, ReentrancyGuard {
         
         // 确定哪个是 BASE token，哪个是 USDT
         address token0 = pool.token0();
-        address token1 = pool.token1();
         
         // 计算储备量（简化计算，仅作示例）
         uint256 reserve0;
@@ -123,9 +140,13 @@ contract DataReceiverAndPumper is Ownable, ReentrancyGuard {
         baseAmount = (usdtAmount * price) / 1e6;
     }
 
-    // 项目方或授权的oracle上传链下数据并触发行动
+    // 授权的oracle上传链下数据并触发行动
     // actionAmount: 用于购买的USDT量（6位小数）
     function receiveDataAndAct(uint256 actionAmount, bytes32 dataHash, string calldata dataType) external onlyOwner nonReentrant {
+        // 注意：这个函数当前仍然使用onlyOwner修饰符
+        // 如果需要让Oracle合约调用，应该修改为：require(msg.sender == oracleAddress, "Only oracle")
+        // 但这需要Oracle合约实现相应的调用功能
+        // 这里保留onlyOwner以便项目方也可以手动触发
         require(actionAmount > 0, "Action amount must be positive");
         
         // 1. 检查储备健康度
