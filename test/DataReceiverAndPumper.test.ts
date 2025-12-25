@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { DataReceiverAndPumper, BaseToken } from "../typechain-types";
+import { DataReceiverAndPumper, XZToken } from "../typechain-types";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 
 describe("DataReceiverAndPumper", function () {
@@ -424,6 +424,48 @@ describe("DataReceiverAndPumper", function () {
       await dataReceiverAndPumper.storeHash(testHash, testDataType);
 
       // 第二次调用storeHash函数，应该失败
+      await expect(
+        dataReceiverAndPumper.storeHash(testHash, testDataType)
+      ).to.be.revertedWith("Hash already stored");
+    });
+  });
+
+  describe("检查函数", function () {
+    it("checkReserveHealth应该在储备充足时返回true", async function () {
+      expect(await dataReceiverAndPumper.checkReserveHealth()).to.be.true;
+    });
+
+    it("checkReserveHealth应该在储备不足时返回false", async function () {
+      await dataReceiverAndPumper.connect(owner).setMinReserveThresholds(
+        ethers.parseEther("999999999"),
+        999999999 * 10**6
+      );
+      expect(await dataReceiverAndPumper.checkReserveHealth()).to.be.false;
+    });
+
+    it("isPriceDataFresh应该在数据新鲜时返回true", async function () {
+      expect(await dataReceiverAndPumper.isPriceDataFresh(3600)).to.be.true;
+    });
+  });
+
+  describe("monitorPoolSafety", function () {
+    it("应该发出池子状态检查事件", async function () {
+      await expect(dataReceiverAndPumper.monitorPoolSafety())
+        .to.emit(dataReceiverAndPumper, "PoolStatusCheck")
+        .withArgs(owner.address, true);
+    });
+
+    it("当池子不健康时应该发出低储备风险事件", async function () {
+      await dataReceiverAndPumper.connect(owner).setMinReserveThresholds(
+        ethers.parseEther("999999999"),
+        999999999 * 10**6
+      );
+      await expect(dataReceiverAndPumper.monitorPoolSafety())
+        .to.emit(dataReceiverAndPumper, "LowReserveRisk")
+        .withArgs(owner.address, anyValue, anyValue);
+    });
+  });
+});数，应该失败
       await expect(
         dataReceiverAndPumper.storeHash(testHash, testDataType)
       ).to.be.revertedWith("Hash already stored");

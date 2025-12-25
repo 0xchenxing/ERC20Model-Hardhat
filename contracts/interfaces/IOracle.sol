@@ -55,6 +55,7 @@ interface IOracle {
     struct ProjectConfig {
         address owner;          // 项目所有者
         bool isActive;          // 项目是否激活
+        bytes description;      // 项目描述（bytes类型）
         address[] authorizedSubmitters; // 授权提交者列表
         uint256 dataTTL;        // 数据有效期（秒）
     }
@@ -187,7 +188,20 @@ interface IOracle {
         bytes32 pid
     ) external view returns (address owner);
     
-
+    /**
+     * @dev 通过地址查询对应项目
+     * @param addr 查询地址
+     * @return projects 该地址作为所有者或授权提交者的所有项目ID
+     */
+    function getProjectsByAddress(
+        address addr
+    ) external view returns (bytes32[] memory projects);
+    
+    /**
+     * @dev 获取所有项目ID
+     * @return projects 所有项目ID数组
+     */
+    function getAllProjects() external view returns (bytes32[] memory projects);
     
     /**
      * @dev 将年月日转换为标准的did格式

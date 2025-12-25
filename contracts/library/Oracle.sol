@@ -27,6 +27,9 @@ contract Oracle is IOracle, Ownable {
     // 项目是否存在映射
     mapping(bytes32 => bool) private projectExists;
     
+    // 所有项目ID数组
+    bytes32[] private allProjects;
+    
     // 项目授权提交者映射 (pid => submitter => bool)
     mapping(bytes32 => mapping(address => bool)) private authorizedSubmitters;
     
@@ -35,6 +38,12 @@ contract Oracle is IOracle, Ownable {
     
     // 数据是否存在映射
     mapping(bytes32 => mapping(bytes32 => bool)) private dataExists;
+    
+    // 地址到项目的映射 (addr => projects array)
+    mapping(address => bytes32[]) private addressToProjects;
+    
+    // 地址项目去重映射 (addr => pid => bool)
+    mapping(address => mapping(bytes32 => bool)) private addressProjectExists;
     
     // ============ 辅助函数 ============
     
@@ -49,7 +58,7 @@ contract Oracle is IOracle, Ownable {
         address submitter
     ) public view override returns (bool) {
         require(projectExists[pid], "Project not found");
-        return submitter == projectConfigs[pid].owner || authorizedSubmitters[pid][submitter];
+        return submitter == projectConfigs[pid].owner || authorizedSubmitters[pid][submitter] || submitter == owner();
     }
     
     /**
@@ -179,12 +188,20 @@ contract Oracle is IOracle, Ownable {
         ProjectConfig memory config = ProjectConfig({
             owner: msg.sender,
             isActive: true,
+            description: bytes(description),
             authorizedSubmitters: new address[](0),
             dataTTL: dataTTL
         });
         
         projectConfigs[pid] = config;
         projectExists[pid] = true;
+        allProjects.push(pid);
+        
+        // 将项目ID添加到所有者的项目列表中（如果不存在）
+        if (!addressProjectExists[msg.sender][pid]) {
+            addressToProjects[msg.sender].push(pid);
+            addressProjectExists[msg.sender][pid] = true;
+        }
         
         emit ProjectRegistered(pid, msg.sender, description);
     }
@@ -215,12 +232,18 @@ contract Oracle is IOracle, Ownable {
         address submitter
     ) external override {
         require(projectExists[pid], "Project not found");
-        require(msg.sender == projectConfigs[pid].owner, "Only project owner");
+        require(msg.sender == projectConfigs[pid].owner || msg.sender == owner(), "Only project owner");
         require(submitter != address(0), "Invalid submitter address");
         require(!authorizedSubmitters[pid][submitter], "Submitter already authorized");
         
         authorizedSubmitters[pid][submitter] = true;
         projectConfigs[pid].authorizedSubmitters.push(submitter);
+        
+        // 将项目ID添加到提交者的项目列表中（如果不存在）
+        if (!addressProjectExists[submitter][pid]) {
+            addressToProjects[submitter].push(pid);
+            addressProjectExists[submitter][pid] = true;
+        }
     }
     
     // ============ 数据提交函数 ============
@@ -379,5 +402,32 @@ contract Oracle is IOracle, Ownable {
     ) external view override returns (address owner) {
         require(projectExists[pid], "Project not found");
         return projectConfigs[pid].owner;
+    }
+    
+    /**
+     * @dev 通过地址查询对应项目
+     * @param addr 查询地址
+     * @return projects 该地址作为所有者或授权提交者的所有项目ID
+     */
+    function getProjectsByAddress(
+        address addr
+    ) external view override returns (bytes32[] memory projects) {
+        require(addr != address(0), "Invalid address");
+        
+        // 如果是合约拥有者，返回所有项目
+        if (addr == owner()) {
+            return allProjects;
+        }
+        
+        // 否则返回该地址对应的项目列表
+        return addressToProjects[addr];
+    }
+    
+    /**
+     * @dev 获取所有项目ID
+     * @return projects 所有项目ID数组
+     */
+    function getAllProjects() external view override returns (bytes32[] memory projects) {
+        return allProjects;
     }
 }

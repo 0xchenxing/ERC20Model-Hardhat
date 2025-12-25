@@ -1,8 +1,12 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import * as dotenv from "dotenv";
+
+// 加载环境变量
+dotenv.config();
 
 const privateKey = process.env.PRIVATE_KEY || "";
-const alchemyProjectId = process.env.ALCHEMY_PROJECT_ID || "";
+const bscTestnetUrl = process.env.BSC_TESTNET_URL || "https://bnb-testnet.g.alchemy.com/v2/hBKil_dGDR-Vq0ZffnFVwwpyJYLp8-rf";
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -50,11 +54,12 @@ const config: HardhatUserConfig = {
     //   accounts: ["YOUR_PRIVATE_KEY"]
     // },
     
-    // // BSC测试网
-    // bscTestnet: {
-    //   url: "https://data-seed-prebsc-1-s1.binance.org:8545",
-    //   accounts: ["YOUR_PRIVATE_KEY"]
-    // },
+    // BSC测试网
+    bscTestnet: {
+      url: bscTestnetUrl,
+      accounts: [privateKey],
+      timeout: 60000 // 增加超时时间到60秒
+    },
     
     // // BSC主网
     // bsc: {
