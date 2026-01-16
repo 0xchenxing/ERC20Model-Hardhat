@@ -26,12 +26,12 @@ interface IOracle {
     /**
      * @dev 项目注册事件
      * @param pid 项目ID
-     * @param owner 项目所有者
+     * @param submitter 提交者地址
      * @param description 项目描述
      */
     event ProjectRegistered(
         bytes32 indexed pid,
-        address indexed owner,
+        address indexed submitter,
         string description
     );
     
@@ -53,7 +53,6 @@ interface IOracle {
      * @dev 项目配置结构
      */
     struct ProjectConfig {
-        address owner;          // 项目所有者
         bool isActive;          // 项目是否激活
         bytes description;      // 项目描述（bytes类型）
         address[] authorizedSubmitters; // 授权提交者列表
@@ -97,7 +96,7 @@ interface IOracle {
     // ============ 数据提交函数 ============
     
     /**
-     * @dev 提交数据（仅限项目方或授权提交者）
+     * @dev 提交数据（限管理员、数据上传者或授权提交者）
      * @param pid 项目ID
      * @param did 数据ID（格式：年月日，如"20231001"表示2023年10月1日）
      * @param coreData 核心数据
@@ -111,7 +110,7 @@ interface IOracle {
     ) external;
     
     /**
-     * @dev 批量提交数据（仅限项目方或授权提交者）
+     * @dev 批量提交数据（限管理员、数据上传者或授权提交者）
      * @param pids 项目ID数组
      * @param dids 数据ID数组（格式：年月日，如"20231001"表示2023年10月1日）
      * @param coreDataArray 核心数据数组
@@ -180,18 +179,9 @@ interface IOracle {
     ) external view returns (bool);
     
     /**
-     * @dev 获取项目所有者
-     * @param pid 项目ID
-     * @return owner 项目所有者地址
-     */
-    function getProjectOwner(
-        bytes32 pid
-    ) external view returns (address owner);
-    
-    /**
      * @dev 通过地址查询对应项目
      * @param addr 查询地址
-     * @return projects 该地址作为所有者或授权提交者的所有项目ID
+     * @return projects 该地址作为授权提交者的所有项目ID
      */
     function getProjectsByAddress(
         address addr
@@ -202,6 +192,53 @@ interface IOracle {
      * @return projects 所有项目ID数组
      */
     function getAllProjects() external view returns (bytes32[] memory projects);
+    
+    /**
+     * @dev 获取项目的最新数据
+     * @param pid 项目ID
+     * @return data 最新数据详情
+     */
+    function getLatestData(bytes32 pid) external view returns (OracleData memory data);
+    
+    /**
+     * @dev 获取项目的最新数据ID
+     * @param pid 项目ID
+     * @return did 最新数据ID
+     */
+    function getLatestDataId(bytes32 pid) external view returns (bytes32 did);
+    
+    /**
+     * @dev 获取项目的所有数据ID
+     * @param pid 项目ID
+     * @return dids 所有数据ID数组
+     */
+    function getDataIds(bytes32 pid) external view returns (bytes32[] memory dids);
+    
+    /**
+     * @dev 按前缀模糊查询数据ID
+     * @param pid 项目ID
+     * @param prefix 前缀（如0x323031330000...表示"2023"开头的日期）
+     * @return matchingIds 匹配的数据ID数组
+     */
+    function getDataIdsByPrefix(bytes32 pid, bytes32 prefix) external view returns (bytes32[] memory matchingIds);
+    
+    /**
+     * @dev 按年月查询数据ID
+     * @param pid 项目ID
+     * @param year 年份（如2023）
+     * @param month 月份（1-12）
+     * @return matchingIds 匹配的数据ID数组
+     */
+    function getDataIdsByYearMonth(bytes32 pid, uint16 year, uint8 month) external view returns (bytes32[] memory matchingIds);
+    
+    /**
+     * @dev 查询指定年月的数据最新一条
+     * @param pid 项目ID
+     * @param year 年份（如2023）
+     * @param month 月份（1-12）
+     * @return data 最新数据详情
+     */
+    function getLatestDataByYearMonth(bytes32 pid, uint16 year, uint8 month) external view returns (OracleData memory data);
     
     /**
      * @dev 将年月日转换为标准的did格式

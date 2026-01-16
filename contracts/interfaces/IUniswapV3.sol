@@ -2,17 +2,16 @@
 pragma solidity ^0.8.20;
 
 /**
- * @title IUniswapV3Router
- * @dev Uniswap V3 Router的接口定义
+ * @title ISwapRouter02
+ * @dev Uniswap V3 ISwapRouter02的接口定义
  */
-interface IUniswapV3Router {
+interface ISwapRouter02 {
     /**
      * @dev ExactInput参数结构体
      */
     struct ExactInputParams {
         bytes path;
         address recipient;
-        uint256 deadline;
         uint256 amountIn;
         uint256 amountOutMinimum;
     }
@@ -25,7 +24,6 @@ interface IUniswapV3Router {
         address tokenOut;
         uint24 fee;
         address recipient;
-        uint256 deadline;
         uint256 amountIn;
         uint256 amountOutMinimum;
         uint160 sqrtPriceLimitX96;

@@ -1,83 +1,62 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // 导入自定义接口
-import { IUniswapV3Router, IUniswapV3Factory } from "./interfaces/IUniswapV3.sol";
+import { ISwapRouter02, IUniswapV3Factory } from "./interfaces/IUniswapV3.sol";
 import { XZToken } from "./XZToken.sol";
 
-contract DataReceiverAndPumper is Ownable {
-    address public tokenAddress;
-    address public usdtAddress;
-    address public routerAddress;
-    uint24 public poolFee;
+contract DataReceiverAndPumper {
+    address public constant token = 0xf88789848F2115aC6Cc373113d02dc00e08DC954;
+    address public constant usdt = 0x2Bd4D30d4E026146039600aF11e83e4f8277BbDD;
+    address public constant router = 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E;
+    uint24 public constant poolFee = 3000;
     
     // 事件
     event DataReceivedAndActed(uint256 actionAmount, bool bought, uint256 amountUsed);
 
-    constructor(
-        address _tokenAddress,
-        address _usdtAddress,
-        address _routerAddress,
-        uint24 _poolFee
-    ) Ownable(msg.sender) {
-        tokenAddress = _tokenAddress;
-        usdtAddress = _usdtAddress;
-        routerAddress = _routerAddress;
-        poolFee = _poolFee;
-    }
+    constructor() {}
 
     // 接收前端解析后的总数据并执行回购销毁
-    function receiveDataAndAct(uint256 actionAmount) external onlyOwner {
+    function receiveDataAndAct(uint256 actionAmount) external {
         require(actionAmount > 0, "Action amount must be positive");
         
-        IERC20 usdt = IERC20(usdtAddress);
-        uint256 contractBalance = usdt.balanceOf(address(this));
-
-        require(contractBalance >= actionAmount, "Insufficient USDT balance");
+        IERC20 USDT = IERC20(usdt);
         
+        //提前授权USDT给合约
+        USDT.transferFrom(msg.sender, address(this), actionAmount);
         // 批准Uniswap路由器花费USDT
-        usdt.approve(routerAddress, actionAmount);
+        USDT.approve(router, actionAmount);
 
         // 使用USDT在Uniswap V3购买token代币
-        IUniswapV3Router.ExactInputSingleParams memory params = IUniswapV3Router.ExactInputSingleParams({
-            tokenIn: usdtAddress,
-            tokenOut: tokenAddress,
+        ISwapRouter02.ExactInputSingleParams memory params = ISwapRouter02.ExactInputSingleParams({
+            tokenIn: usdt,
+            tokenOut: token,
             fee: poolFee,
             recipient: address(this),
-            deadline: block.timestamp + 300,
             amountIn: actionAmount,
             amountOutMinimum: 0, // 最小输出量（简化版不做复杂检查）
             sqrtPriceLimitX96: 0 // 无价格限制
         });
 
-        uint256 amountOut = IUniswapV3Router(routerAddress).exactInputSingle(params);
+        uint256 amountOut = ISwapRouter02(router).exactInputSingle(params);
         
         // 销毁购买获得的token代币
-        XZToken(tokenAddress).burn(amountOut);
+        XZToken(token).burn(amountOut);
 
         emit DataReceivedAndActed(actionAmount, true, amountOut); // amountOut 是获得并销毁的token量
     }
-
-    // 项目方提取USDT
-    function withdrawUSDT(uint256 amount) external onlyOwner {
-        IERC20(usdtAddress).transfer(owner(), amount);
-    }
     
-    // /**
-    //  * @dev 获取Uniswap V3池地址
-    //  * @return pool 池地址
-    //  */
-    // function getPoolAddress() public view returns (address pool) {
-    //     IUniswapV3Router router = IUniswapV3Router(routerAddress);
-    //     address factoryAddress = router.factory();
-    //     IUniswapV3Factory factory = IUniswapV3Factory(factoryAddress);
+    /**
+     * @dev 获取Uniswap V3池地址
+     * @return pool 池地址
+     */
+    function getPoolAddress() public view returns (address pool) {
+        ISwapRouter02 router = ISwapRouter02(router);
+        address factoryAddress = router.factory();
+        IUniswapV3Factory factory = IUniswapV3Factory(factoryAddress);
         
-    //     address token0 = usdtAddress < tokenAddress ? usdtAddress : tokenAddress;
-    //     address token1 = usdtAddress < tokenAddress ? tokenAddress : usdtAddress;
-        
-    //     return factory.getPool(token0, token1, poolFee);
-    // }
+        return factory.getPool(usdt, token, poolFee);
+    }
 }

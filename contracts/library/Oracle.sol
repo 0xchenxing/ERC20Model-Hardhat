@@ -2,21 +2,23 @@
 pragma solidity ^0.8.20;
 
 import {IOracle} from "../interfaces/IOracle.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
  * @title 预言机实现合约
  * @notice 实现IOracle接口，接收链下数据上链，供业务合约读取数据
  */
-contract Oracle is IOracle, Ownable {
+contract Oracle is IOracle, AccessControl {
+    // ============ 角色定义 ============
+    bytes32 public constant DATA_UPLOADER_ROLE = keccak256("DATA_UPLOADER_ROLE");
     // ============ 构造函数 ============
     
     /**
      * @dev 构造函数
-     * @param initialOwner 初始所有者地址
+     * @param initialAdmin 初始管理员地址
      */
-    constructor(address initialOwner) Ownable(initialOwner) {
-        // 构造函数逻辑
+    constructor(address initialAdmin) {
+        _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
     }
     
     // ============ 存储 ============
@@ -45,6 +47,12 @@ contract Oracle is IOracle, Ownable {
     // 地址项目去重映射 (addr => pid => bool)
     mapping(address => mapping(bytes32 => bool)) private addressProjectExists;
     
+    // 项目数据ID列表 (pid => did array)
+    mapping(bytes32 => bytes32[]) private projectDataIds;
+    
+    // 项目数据ID去重映射 (pid => did => bool)
+    mapping(bytes32 => mapping(bytes32 => bool)) private dataIdExists;
+    
     // ============ 辅助函数 ============
     
     /**
@@ -58,7 +66,10 @@ contract Oracle is IOracle, Ownable {
         address submitter
     ) public view override returns (bool) {
         require(projectExists[pid], "Project not found");
-        return submitter == projectConfigs[pid].owner || authorizedSubmitters[pid][submitter] || submitter == owner();
+        // 管理员或数据上传者角色可以提交数据
+        return hasRole(DEFAULT_ADMIN_ROLE, submitter) || 
+               hasRole(DATA_UPLOADER_ROLE, submitter) || 
+               authorizedSubmitters[pid][submitter];
     }
     
     /**
@@ -184,9 +195,10 @@ contract Oracle is IOracle, Ownable {
     ) external override {
         require(!projectExists[pid], "Project already exists");
         require(dataTTL > 0, "Data TTL must be positive");
+        // 只有管理员或数据上传者可以注册项目
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender) || hasRole(DATA_UPLOADER_ROLE, msg.sender), "Not authorized");
         
         ProjectConfig memory config = ProjectConfig({
-            owner: msg.sender,
             isActive: true,
             description: bytes(description),
             authorizedSubmitters: new address[](0),
@@ -197,7 +209,7 @@ contract Oracle is IOracle, Ownable {
         projectExists[pid] = true;
         allProjects.push(pid);
         
-        // 将项目ID添加到所有者的项目列表中（如果不存在）
+        // 将项目ID添加到创建者的项目列表中
         if (!addressProjectExists[msg.sender][pid]) {
             addressToProjects[msg.sender].push(pid);
             addressProjectExists[msg.sender][pid] = true;
@@ -216,7 +228,8 @@ contract Oracle is IOracle, Ownable {
         uint256 dataTTL
     ) external override {
         require(projectExists[pid], "Project not found");
-        require(msg.sender == projectConfigs[pid].owner, "Only project owner");
+        // 只有管理员、数据上传者或项目授权提交者可以更新项目配置
+        require(isAuthorizedSubmitter(pid, msg.sender), "Not authorized submitter");
         require(dataTTL > 0, "Data TTL must be positive");
         
         projectConfigs[pid].dataTTL = dataTTL;
@@ -232,7 +245,8 @@ contract Oracle is IOracle, Ownable {
         address submitter
     ) external override {
         require(projectExists[pid], "Project not found");
-        require(msg.sender == projectConfigs[pid].owner || msg.sender == owner(), "Only project owner");
+        // 只有管理员、数据上传者或项目授权提交者可以添加授权提交者
+        require(isAuthorizedSubmitter(pid, msg.sender), "Not authorized submitter");
         require(submitter != address(0), "Invalid submitter address");
         require(!authorizedSubmitters[pid][submitter], "Submitter already authorized");
         
@@ -249,7 +263,7 @@ contract Oracle is IOracle, Ownable {
     // ============ 数据提交函数 ============
     
     /**
-     * @dev 提交数据（仅限项目方或授权提交者）
+     * @dev 提交数据（限管理员、数据上传者或授权提交者）
      * @param pid 项目ID
      * @param did 数据ID（格式：年月日，如"20231001"表示2023年10月1日）
      * @param coreData 核心数据
@@ -266,7 +280,7 @@ contract Oracle is IOracle, Ownable {
     }
     
     /**
-     * @dev 批量提交数据（仅限项目方或授权提交者）
+     * @dev 批量提交数据（限管理员、数据上传者或授权提交者）
      * @param pids 项目ID数组
      * @param dids 数据ID数组（格式：年月日，如"20231001"表示2023年10月1日）
      * @param coreDataArray 核心数据数组
@@ -316,6 +330,12 @@ contract Oracle is IOracle, Ownable {
         
         oracleData[pid][did] = data;
         dataExists[pid][did] = true;
+        
+        // 记录数据ID（用于最新查询和模糊查询）
+        if (!dataIdExists[pid][did]) {
+            projectDataIds[pid].push(did);
+            dataIdExists[pid][did] = true;
+        }
         
         emit DataSubmitted(pid, did, msg.sender, block.timestamp);
     }
@@ -393,29 +413,17 @@ contract Oracle is IOracle, Ownable {
     }
     
     /**
-     * @dev 获取项目所有者
-     * @param pid 项目ID
-     * @return owner 项目所有者地址
-     */
-    function getProjectOwner(
-        bytes32 pid
-    ) external view override returns (address owner) {
-        require(projectExists[pid], "Project not found");
-        return projectConfigs[pid].owner;
-    }
-    
-    /**
      * @dev 通过地址查询对应项目
      * @param addr 查询地址
-     * @return projects 该地址作为所有者或授权提交者的所有项目ID
+     * @return projects 该地址作为授权提交者的所有项目ID
      */
     function getProjectsByAddress(
         address addr
     ) external view override returns (bytes32[] memory projects) {
         require(addr != address(0), "Invalid address");
         
-        // 如果是合约拥有者，返回所有项目
-        if (addr == owner()) {
+        // 如果是管理员或数据上传者，返回所有项目
+        if (hasRole(DEFAULT_ADMIN_ROLE, addr) || hasRole(DATA_UPLOADER_ROLE, addr)) {
             return allProjects;
         }
         
@@ -429,5 +437,177 @@ contract Oracle is IOracle, Ownable {
      */
     function getAllProjects() external view override returns (bytes32[] memory projects) {
         return allProjects;
+    }
+    
+    /**
+     * @dev 获取项目的最新数据
+     * @param pid 项目ID
+     * @return data 最新数据详情
+     */
+    function getLatestData(bytes32 pid) external view override returns (OracleData memory data) {
+        require(projectExists[pid], "Project not found");
+        bytes32[] storage dataIds = projectDataIds[pid];
+        require(dataIds.length > 0, "No data found");
+        
+        bytes32 latestDid = dataIds[0];
+        // 按时间戳排序获取最新的数据ID
+        for (uint256 i = 1; i < dataIds.length; i++) {
+            if (oracleData[pid][dataIds[i]].submitTime > oracleData[pid][latestDid].submitTime) {
+                latestDid = dataIds[i];
+            }
+        }
+        
+        return this.getData(pid, latestDid);
+    }
+    
+    /**
+     * @dev 获取项目的最新数据ID
+     * @param pid 项目ID
+     * @return did 最新数据ID
+     */
+    function getLatestDataId(bytes32 pid) external view override returns (bytes32 did) {
+        require(projectExists[pid], "Project not found");
+        bytes32[] storage dataIds = projectDataIds[pid];
+        require(dataIds.length > 0, "No data found");
+        
+        bytes32 latestDid = dataIds[0];
+        for (uint256 i = 1; i < dataIds.length; i++) {
+            if (oracleData[pid][dataIds[i]].submitTime > oracleData[pid][latestDid].submitTime) {
+                latestDid = dataIds[i];
+            }
+        }
+        
+        return latestDid;
+    }
+    
+    /**
+     * @dev 获取项目的所有数据ID
+     * @param pid 项目ID
+     * @return dids 所有数据ID数组
+     */
+    function getDataIds(bytes32 pid) external view override returns (bytes32[] memory dids) {
+        require(projectExists[pid], "Project not found");
+        return projectDataIds[pid];
+    }
+    
+    /**
+     * @dev 按前缀模糊查询数据ID
+     * @param pid 项目ID
+     * @param prefix 前缀（如0x32303233...表示"2023"开头的日期）
+     * @return matchingIds 匹配的数据ID数组
+     */
+    function getDataIdsByPrefix(bytes32 pid, bytes32 prefix) external view override returns (bytes32[] memory matchingIds) {
+        require(projectExists[pid], "Project not found");
+        bytes32[] storage dataIds = projectDataIds[pid];
+        
+        // 计算prefix的实际长度（从左侧开始，到第一个0字节为止）
+        // 因为encodeBytes32String将内容存储在最高有效位（左侧）
+        uint256 prefixLen = 0;
+        for (uint256 i = 0; i < 32; i++) {
+            uint8 prefixByte = uint8(uint256(prefix >> (8 * (31 - i))) & 0xFF);
+            if (prefixByte == 0) {
+                break;
+            }
+            prefixLen++;
+        }
+        
+        // 如果prefix全部为0或为空，返回空数组
+        if (prefixLen == 0) {
+            bytes32[] memory emptyResult = new bytes32[](0);
+            return emptyResult;
+        }
+        
+        // 第一次遍历：统计匹配数量
+        uint256 matchCount = 0;
+        for (uint256 i = 0; i < dataIds.length; i++) {
+            bytes32 did = dataIds[i];
+            bool matches = true;
+            // 比较前prefixLen个字节（从最高位开始）
+            for (uint256 j = 0; j < prefixLen; j++) {
+                uint8 prefixByte = uint8(uint256(prefix >> (8 * (31 - j))) & 0xFF);
+                uint8 didByte = uint8(uint256(did >> (8 * (31 - j))) & 0xFF);
+                if (prefixByte != didByte) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                matchCount++;
+            }
+        }
+        
+        // 第二次遍历：填充结果数组
+        bytes32[] memory result = new bytes32[](matchCount);
+        uint256 resultIndex = 0;
+        for (uint256 i = 0; i < dataIds.length; i++) {
+            bytes32 did = dataIds[i];
+            bool matches = true;
+            for (uint256 j = 0; j < prefixLen; j++) {
+                uint8 prefixByte = uint8(uint256(prefix >> (8 * (31 - j))) & 0xFF);
+                uint8 didByte = uint8(uint256(did >> (8 * (31 - j))) & 0xFF);
+                if (prefixByte != didByte) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                result[resultIndex] = did;
+                resultIndex++;
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * @dev 按年月查询数据ID
+     * @param pid 项目ID
+     * @param year 年份（如2023）
+     * @param month 月份（1-12）
+     * @return matchingIds 匹配的数据ID数组
+     */
+    function getDataIdsByYearMonth(bytes32 pid, uint16 year, uint8 month) external view override returns (bytes32[] memory matchingIds) {
+        require(projectExists[pid], "Project not found");
+        require(year >= 2000 && year <= 2100, "Invalid year");
+        require(month >= 1 && month <= 12, "Invalid month");
+        
+        bytes32[] storage dataIds = projectDataIds[pid];
+        
+        // 构建年月前缀（如2023年10月 => 0x3230313130300000...）
+        // 因为encodeBytes32String将内容存储在最高有效位（左侧），所以字符从位置31开始向左存储
+        bytes32 yearMonthPrefix = bytes32(0);
+        yearMonthPrefix = bytes32(uint256(yearMonthPrefix) | (uint256(uint8((year / 1000) % 10 + 48)) << 248));
+        yearMonthPrefix = bytes32(uint256(yearMonthPrefix) | (uint256(uint8((year / 100) % 10 + 48)) << 240));
+        yearMonthPrefix = bytes32(uint256(yearMonthPrefix) | (uint256(uint8((year / 10) % 10 + 48)) << 232));
+        yearMonthPrefix = bytes32(uint256(yearMonthPrefix) | (uint256(uint8(year % 10 + 48)) << 224));
+        yearMonthPrefix = bytes32(uint256(yearMonthPrefix) | (uint256(uint8((month / 10) % 10 + 48)) << 216));
+        yearMonthPrefix = bytes32(uint256(yearMonthPrefix) | (uint256(uint8(month % 10 + 48)) << 208));
+        
+        return this.getDataIdsByPrefix(pid, yearMonthPrefix);
+    }
+    
+    /**
+     * @dev 查询指定年月的数据最新一条
+     * @param pid 项目ID
+     * @param year 年份（如2023）
+     * @param month 月份（1-12）
+     * @return data 最新数据详情
+     */
+    function getLatestDataByYearMonth(bytes32 pid, uint16 year, uint8 month) external view override returns (OracleData memory data) {
+        require(projectExists[pid], "Project not found");
+        require(year >= 2000 && year <= 2100, "Invalid year");
+        require(month >= 1 && month <= 12, "Invalid month");
+        
+        bytes32[] memory dataIds = this.getDataIdsByYearMonth(pid, year, month);
+        require(dataIds.length > 0, "No data found for this period");
+        
+        bytes32 latestDid = dataIds[0];
+        for (uint256 i = 1; i < dataIds.length; i++) {
+            if (oracleData[pid][dataIds[i]].submitTime > oracleData[pid][latestDid].submitTime) {
+                latestDid = dataIds[i];
+            }
+        }
+        
+        return this.getData(pid, latestDid);
     }
 }
