@@ -6,7 +6,7 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 const privateKey = process.env.PRIVATE_KEY || "";
-const bscTestnetUrl = process.env.BSC_TESTNET_URL || "https://bnb-testnet.g.alchemy.com/v2/hBKil_dGDR-Vq0ZffnFVwwpyJYLp8-rf";
+const alchemyProjectId = process.env.ALCHEMY_PROJECT_ID || "";
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -31,10 +31,10 @@ const config: HardhatUserConfig = {
     },
     
     // Ethereum Sepolia测试网
-    // sepolia: {
-    //   url: `https://eth-sepolia.g.alchemy.com/v2/${alchemyProjectId}`,
-    //   accounts: [privateKey]
-    // },
+    sepolia: {
+      url: `https://eth-sepolia.g.alchemy.com/v2/${alchemyProjectId}`,
+      accounts: [privateKey]
+    },
     
     // // Ethereum主网
     // mainnet: {
@@ -56,7 +56,7 @@ const config: HardhatUserConfig = {
     
     // BSC测试网
     bscTestnet: {
-      url: bscTestnetUrl,
+      url: `https://bnb-testnet.g.alchemy.com/v2/${alchemyProjectId}`,
       accounts: [privateKey],
       timeout: 60000 // 增加超时时间到60秒
     },

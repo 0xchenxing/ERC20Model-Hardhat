@@ -68,8 +68,6 @@ contract TokenLockVault is Ownable {
     // 权限控制
     mapping(address => bool) public operators;
     
-
-    
     /**
      * @dev 构造函数
      * @param initialOwner 初始所有者地址

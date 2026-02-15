@@ -125,4 +125,16 @@ interface IUniswapV3Pool {
      * @return secondsPerLiquidityCumulativeX128s 每个时间点的秒/流动性累积值（X128格式）
      */
     function observe(uint32[] calldata secondsAgos) external view returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
+    
+    /**
+     * @dev 获取池的最小tick值
+     * @return minTick 最小tick值
+     */
+    function minTick() external view returns (int24);
+    
+    /**
+     * @dev 获取池的最大tick值
+     * @return maxTick 最大tick值
+     */
+    function maxTick() external view returns (int24);
 }

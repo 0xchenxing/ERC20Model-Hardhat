@@ -8,9 +8,9 @@ import { ISwapRouter02, IUniswapV3Factory } from "./interfaces/IUniswapV3.sol";
 import { XZToken } from "./XZToken.sol";
 
 contract DataReceiverAndPumper {
-    address public constant token = 0xf88789848F2115aC6Cc373113d02dc00e08DC954;
-    address public constant usdt = 0x2Bd4D30d4E026146039600aF11e83e4f8277BbDD;
-    address public constant router = 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E;
+    address public constant token = 0xf88789848F2115aC6Cc373113d02dc00e08DC954;//此为sepolia测试网的token地址
+    address public constant usdt = 0x2Bd4D30d4E026146039600aF11e83e4f8277BbDD;//此为sepolia测试网的USDT地址
+    address public constant router = 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E;//此为sepolia测试网的UniswapV3 ISwapRouter02地址
     uint24 public constant poolFee = 3000;
     
     // 事件
